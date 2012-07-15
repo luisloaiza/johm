@@ -9,7 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import redis.clients.jedis.JedisException;
+
+import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.TransactionBlock;
 import redis.clients.johm.collections.RedisArray;
@@ -132,7 +133,107 @@ public final class JOhm {
         }
         return (List<T>) results;
     }
+    
+    ////Delete a Custom Key of MODEL
+    
+    public static Long delete(Class<?> clazz,String attributeName, Object attributeValue){
+    	
+    	return Nest.del(jedisPool, Nest.generateKey(clazz, attributeName, attributeValue));
+    }
+    
+    //Get Elements by params and value
+    @SuppressWarnings("unchecked")
+    public static <T> List<T> getBy(Class<?> clazz, String attributeName,Object attributeValue){
+    	
+    	 JOhmUtils.Validator.checkValidModelClazz(clazz);
+         List<Object> results = null;
+         
+         Nest nest = new Nest(clazz);
+         nest.setJedisPool(jedisPool);
+         Set<String> modelIdStrings = nest.cat(attributeName).cat(attributeValue).smembers();
+         
+   
+         if (modelIdStrings != null) {
+             // TODO: Do this lazy
+             results = new ArrayList<Object>();
+             Object indexed = null;
+             for (String modelIdString : modelIdStrings) {
+                 indexed = get(clazz, Long.parseLong(modelIdString));
+                 if (indexed != null) {
+                     results.add(indexed);
+                 }
+             }
+         }
+         return (List<T>) results;
+         
+    }
+    
+    //Perform a JOIN as where attr = 'val' and attr2 = val2
+    @SuppressWarnings("unchecked")
+    public static <T> List<T> join(Class<?> clazz, String attributeName1,Object attributeValue1,
+    		String attributeName2,Object attributeValue2) {
+        JOhmUtils.Validator.checkValidModelClazz(clazz);
+        List<Object> results = null;
+        if (!JOhmUtils.Validator.isIndexable(attributeName1) || !JOhmUtils.Validator.isIndexable(attributeName2)) {
+            throw new InvalidFieldException();
+        }
 
+        try {
+            Field field1 = clazz.getDeclaredField(attributeName1);
+            field1.setAccessible(true);
+            
+            Field field2 = clazz.getDeclaredField(attributeName2);
+            field2.setAccessible(true);
+            
+            if (!field1.isAnnotationPresent(Indexed.class) || !field2.isAnnotationPresent(Indexed.class)) {
+                throw new InvalidFieldException();
+            }
+            if (field1.isAnnotationPresent(Reference.class) && field2.isAnnotationPresent(Reference.class)) {
+                attributeName1 = JOhmUtils.getReferenceKeyName(field1);
+                attributeName2 = JOhmUtils.getReferenceKeyName(field2);
+            }
+        } catch (SecurityException e) {
+            throw new InvalidFieldException();
+        } catch (NoSuchFieldException e) {
+            throw new InvalidFieldException();
+        }
+        if (JOhmUtils.isNullOrEmpty(attributeValue1) || JOhmUtils.isNullOrEmpty(attributeValue2)) {
+            throw new InvalidFieldException();
+        }
+        
+        
+        Set<String> modelIdStrings =Nest.sinter(jedisPool,
+        		Nest.generateKey(clazz, attributeName1, attributeValue1)
+        		,Nest.generateKey(clazz, attributeName2, attributeValue2));
+        
+        if (modelIdStrings != null) {
+            // TODO: Do this lazy
+            results = new ArrayList<Object>();
+            Object indexed = null;
+            for (String modelIdString : modelIdStrings) {
+                indexed = get(clazz, Long.parseLong(modelIdString));
+                if (indexed != null) {
+                    results.add(indexed);
+                }
+            }
+        }
+        return (List<T>) results;
+    }
+
+    
+    /**
+     * Save given model to Redis. By default, this does not save all its child
+     * annotated-models. If hierarchical persistence is desirable, use the
+     * overloaded save interface.
+     * 
+     * @param <T>
+     * @param model
+     * @return
+     */
+    public static <T> T save(final Object model,String extraKeyName) {
+    	
+        return JOhm.<T> save(model, false,extraKeyName);
+    }
     /**
      * Save given model to Redis. By default, this does not save all its child
      * annotated-models. If hierarchical persistence is desirable, use the
@@ -143,11 +244,14 @@ public final class JOhm {
      * @return
      */
     public static <T> T save(final Object model) {
-        return JOhm.<T> save(model, false);
+        return JOhm.<T> save(model, false,null);
     }
 
     @SuppressWarnings("unchecked")
-    public static <T> T save(final Object model, boolean saveChildren) {
+    public static <T> T save(final Object model, boolean saveChildren, String extraKeyName) {
+    	
+    	//System.out.println("savving message...once?");
+    	
         if (!isNew(model)) {
             delete(model.getClass(), JOhmUtils.getId(model));
         }
@@ -199,7 +303,7 @@ public final class JOhm {
                             throw new MissingIdException();
                         }
                         if (saveChildren) {
-                            save(child, saveChildren); // some more work to do
+                            save(child, saveChildren,null); // some more work to do
                         }
                         hashedObject.put(fieldName, String.valueOf(JOhmUtils
                                 .getId(child)));
@@ -216,8 +320,12 @@ public final class JOhm {
                                 String.valueOf(JOhmUtils.getId(model)));
                     }
                 }
+                String id_model=String.valueOf(JOhmUtils.getId(model));
                 // always add to the all set, to support getAll
-                nest.cat("all").sadd(String.valueOf(JOhmUtils.getId(model)));
+                nest.cat("all").sadd(id_model);
+                
+                if(extraKeyName!=null)
+                	nest.cat(extraKeyName).sadd(id_model);//Model:ExtraKey 
             }
         } catch (IllegalArgumentException e) {
             throw new JOhmException(e);

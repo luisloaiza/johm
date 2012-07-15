@@ -54,7 +54,20 @@ public class Nest<T> {
             sb.append(COLON);
         }
     }
-
+    
+    public static String generateKey(Class<?> model, String attributeName,Object valueName){
+    	
+    	StringBuilder s = new StringBuilder();
+         s.append(model.getSimpleName());
+         s.append(COLON);
+         s.append(attributeName);
+         s.append(COLON);
+         s.append(valueName);
+         
+         String generatedKey = s.toString();
+    	return generatedKey;
+    	
+    }
     public Nest<T> cat(int id) {
         prefix();
         sb.append(id);
@@ -161,7 +174,8 @@ public class Nest<T> {
         returnResource(jedis);
         return hkeys;
     }
-
+   
+    
     // Redis Set Operations
     public Long sadd(String member) {
         Jedis jedis = getResource();
@@ -183,6 +197,24 @@ public class Nest<T> {
         returnResource(jedis);
         return members;
     }
+    
+    public static Set<String> sinter(JedisPool jedisPool,final String... keys ) {
+    	
+        Jedis jedis =  jedisPool.getResource();
+        
+        
+        Set<String> members = jedis.sinter(keys);
+        jedisPool.returnResource(jedis);
+        return members;
+    }
+    public static void smove(JedisPool jedisPool,String listnameOld, String listnameNew, String itemvalue ) {
+    	Jedis jedis =  jedisPool.getResource();
+    	
+    	jedis.smove(listnameOld, listnameNew, itemvalue);
+    	 jedisPool.returnResource(jedis);
+    }
+    
+ 
 
     // Redis List Operations
     public Long rpush(String string) {
